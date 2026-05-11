@@ -24,7 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             SettingsView(manager: manager, monitor: monitor, settings: settings)
         )
         let win = NSWindow(contentViewController: host)
-        win.title = "CC Account Manager 설정"
+        win.title = "CCMeter 설정"
         win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         win.setContentSize(NSSize(width: 820, height: 560))
         win.minSize = NSSize(width: 760, height: 500)

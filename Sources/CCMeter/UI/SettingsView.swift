@@ -402,7 +402,7 @@ private struct AboutPanel: View {
             Text("정보").font(AppFonts.swiftUI(size: 14))
             HStack {
                 Text("이름").font(AppFonts.swiftUI(size: 11)).foregroundColor(.secondary).frame(width: 70, alignment: .leading)
-                Text("CC Account Manager").font(AppFonts.swiftUI(size: 12))
+                Text("CCMeter").font(AppFonts.swiftUI(size: 12))
             }
             HStack {
                 Text("버전").font(AppFonts.swiftUI(size: 11)).foregroundColor(.secondary).frame(width: 70, alignment: .leading)
