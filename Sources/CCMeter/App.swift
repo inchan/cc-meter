@@ -81,7 +81,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func prepareAppRoot() {
-        Paths.migrateLegacyAppRootIfNeeded()
         let dirs = [Paths.appRoot, Paths.snapshotsDir, Paths.backupsDir]
         for dir in dirs {
             try? FileManager.default.createDirectory(
