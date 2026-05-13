@@ -6,6 +6,10 @@
     <string>CCMeter</string>
     <key>CFBundleExecutable</key>
     <string>CCMeter</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.inchan.ccmeter</string>
     <key>CFBundleInfoDictionaryVersion</key>
