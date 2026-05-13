@@ -93,11 +93,13 @@ final class StatusItemController {
             .flatMap { sn in sn.sevenDayUtilization.map { ThresholdLevel.from(percent: $0, thresholds: cfg) } }
         let fLevel = fiveLv?.rawValue ?? "-"
         let sLevel = sevenLv?.rawValue ?? "-"
-        let key = "\(acc?.initial ?? "?")|\(acc?.colorHex ?? "")|\(s.menuBarStyle.rawValue)|\(fiveDisplay.map(String.init) ?? "-")|\(fLevel)|\(sevenDisplay.map(String.init) ?? "-")|\(sLevel)|\(s.colorOverrides.description)|\(cfg.caution)/\(cfg.warning)/\(cfg.critical)"
+        let warning = activeNeedsAttention
+        let key = "\(acc?.initial ?? "?")|\(acc?.colorHex ?? "")|\(s.menuBarStyle.rawValue)|\(fiveDisplay.map(String.init) ?? "-")|\(fLevel)|\(sevenDisplay.map(String.init) ?? "-")|\(sLevel)|\(s.colorOverrides.description)|\(cfg.caution)/\(cfg.warning)/\(cfg.critical)|w=\(warning)"
         // Behavior 토글 효과는 매번 적용 (key 변동과 무관) — pulse on/off, tooltip 갱신
         applyBehavior(button: button, account: acc, usage: snap,
                       fiveLv: fiveLv, sevenLv: sevenLv,
-                      fiveDisplay: fiveDisplay, sevenDisplay: sevenDisplay, settings: s)
+                      fiveDisplay: fiveDisplay, sevenDisplay: sevenDisplay,
+                      warning: warning, settings: s)
         if key == lastImageKey { return }
         let prevKey = lastImageKey
         lastImageKey = key
@@ -109,7 +111,8 @@ final class StatusItemController {
             sevenDay: sevenDisplay,
             sevenLevel: sevenLv,
             style: s.menuBarStyle,
-            colorOverrides: s.colorOverrides
+            colorOverrides: s.colorOverrides,
+            warning: warning
         )
         // blinkOnChange — 첫 렌더(prevKey nil) 가 아니라 데이터/설정 변동 시에만 깜빡
         if s.blinkOnChange, prevKey != nil {
@@ -130,12 +133,17 @@ final class StatusItemController {
                                sevenLv: ThresholdLevel?,
                                fiveDisplay: Int?,
                                sevenDisplay: Int?,
+                               warning: Bool,
                                settings s: AppSettings) {
-        // hoverDetail — tooltip 상세 정보 토글
-        button.toolTip = makeTooltip(account: account, usage: usage,
-                                     fiveLv: fiveLv, sevenLv: sevenLv,
-                                     fiveDisplay: fiveDisplay, sevenDisplay: sevenDisplay,
-                                     detail: s.hoverDetail, timeFormat: s.timeFormat)
+        // warning(Keychain 권한 거부 등) 시 tooltip override — hoverDetail 보다 우선.
+        if warning {
+            button.toolTip = "🔐 Keychain 접근 권한 필요 — 메뉴를 열어 새로고침으로 다시 요청하세요"
+        } else {
+            button.toolTip = makeTooltip(account: account, usage: usage,
+                                         fiveLv: fiveLv, sevenLv: sevenLv,
+                                         fiveDisplay: fiveDisplay, sevenDisplay: sevenDisplay,
+                                         detail: s.hoverDetail, timeFormat: s.timeFormat)
+        }
 
         // iconAnimation — 1.6s 호흡 펄스. off면 정지.
         if s.iconAnimation {
@@ -143,6 +151,12 @@ final class StatusItemController {
         } else {
             stopPulse(button: button)
         }
+    }
+
+    /// 활성 계정에 사용자 개입이 필요한 상태 (현재는 Keychain 권한 거부).
+    private var activeNeedsAttention: Bool {
+        guard let id = manager.activeAccountID else { return false }
+        return monitor.lastError[id] == "keychain_denied"
     }
 
     private func startPulse(button: NSStatusBarButton) {

@@ -985,6 +985,7 @@ private struct SystemPanel: View {
     @ObservedObject var settings: AppSettingsStore
     @State private var error: String?
     @State private var info: String?
+    @State private var statusTick: Int = 0  // BTM 상태 재조회 트리거
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -992,15 +993,24 @@ private struct SystemPanel: View {
                 V3Block(title: "Startup") {
                     V3Row(label: "로그인 시 자동 실행") {
                         CCToggle(isOn: Binding(
-                            get: { settings.settings.launchAtLogin },
+                            get: {
+                                // 디스크 의도 + 시스템 실제 등록 둘 다 충족해야 on.
+                                // 재설치/재서명 후 stale 등록 상태 노출 회피.
+                                _ = statusTick
+                                return settings.settings.launchAtLogin
+                                    && LaunchAtLoginService.isEnabled
+                            },
                             set: { newVal in
                                 do {
                                     try LaunchAtLoginService.setEnabled(newVal)
                                     settings.setLaunchAtLogin(newVal)
                                     error = nil
                                 } catch {
-                                    self.error = "설정 실패: \(String(describing: error))"
+                                    self.error = LaunchAtLoginService.requiresUserApproval
+                                        ? "시스템 설정 → 일반 → 로그인 항목 에서 CCMeter 허용 필요"
+                                        : "설정 실패: \(String(describing: error))"
                                 }
+                                statusTick += 1
                             }
                         ))
                     }
@@ -1072,6 +1082,14 @@ private struct SystemPanel: View {
                 .padding(.vertical, 6)
             }
 
+            if LaunchAtLoginService.requiresUserApproval {
+                Banner(text: "⚠️ 시스템 설정 → 일반 → 로그인 항목 에서 CCMeter 활성화가 필요합니다", kind: .error)
+                CCButton(label: "시스템 설정 → 로그인 항목 열기", style: .ghost) {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
             if let info = info {
                 Banner(text: info, kind: .info)
             }
@@ -1079,6 +1097,7 @@ private struct SystemPanel: View {
                 Banner(text: err, kind: .error)
             }
         }
+        .onAppear { statusTick += 1 }
     }
 
     private func resetUsageData() {

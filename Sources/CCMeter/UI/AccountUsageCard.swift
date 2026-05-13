@@ -30,11 +30,11 @@ struct AccountUsageCard: View {
         VStack(alignment: .leading, spacing: 14) {
             header
             progressRows
-            if let err = error, usage == nil {
+            if let err = error, !errorText(err).isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10))
-                    Text(err == "unauthorized" ? "재로그인 필요" : "조회 실패: \(err)")
+                    Text(errorText(err))
                         .font(AppFonts.swiftUI(size: 10, weight: .medium))
                 }
                 .foregroundColor(.orange)
@@ -148,12 +148,26 @@ struct AccountUsageCard: View {
 
     private var avatar: some View {
         Image(nsImage: StatusIconRenderer.render(initial: account.initial,
-                                                 hex: account.colorHex, size: 28))
+                                                 hex: account.colorHex, size: 28,
+                                                 warning: error == "keychain_denied"))
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .stroke(Color.primary.opacity(0.08), lineWidth: 1)
             )
+    }
+
+    /// keychain_denied 는 usage 가 있어도 stale 이므로 항상 안내.
+    /// unauthorized / generic 은 usage 없을 때만 노출 (기존 동작 유지).
+    private func errorText(_ err: String) -> String {
+        switch err {
+        case "keychain_denied":
+            return "🔐 Keychain 접근 권한 필요 — '새로고침' 으로 다시 요청"
+        case "unauthorized":
+            return usage == nil ? "재로그인 필요" : ""
+        default:
+            return usage == nil ? "조회 실패: \(err)" : ""
+        }
     }
 }
 
