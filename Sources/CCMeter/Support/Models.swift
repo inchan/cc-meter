@@ -44,16 +44,39 @@ struct UsageSnapshot: Codable, Hashable, Sendable {
 }
 
 enum ThresholdLevel: String, Codable, Sendable {
-    case healthy   // 0..<50  — green
-    case caution   // 50..<80 — yellow
-    case warning   // 80..<95 — orange
-    case critical  // >=95    — red
+    case healthy   // < caution  — green
+    case caution   // < warning  — yellow
+    case warning   // < critical — orange
+    case critical  // >= critical — red
 
+    /// 기본 임계치 50/80/95 (legacy/fallback).
     static func from(percent: Int) -> ThresholdLevel {
-        if percent >= 95 { return .critical }
-        if percent >= 80 { return .warning }
-        if percent >= 50 { return .caution }
+        from(percent: percent, thresholds: .default)
+    }
+
+    /// 사용자 설정 임계치 적용 버전.
+    static func from(percent: Int, thresholds: ThresholdConfig) -> ThresholdLevel {
+        if percent >= thresholds.critical { return .critical }
+        if percent >= thresholds.warning  { return .warning }
+        if percent >= thresholds.caution  { return .caution }
         return .healthy
+    }
+}
+
+/// 사용자가 설정 가능한 임계치 구간. 정렬: caution < warning < critical.
+struct ThresholdConfig: Sendable, Equatable {
+    var caution: Int
+    var warning: Int
+    var critical: Int
+
+    static let `default` = ThresholdConfig(caution: 50, warning: 80, critical: 95)
+
+    /// 유효 범위(0..100) + 단조 증가 보장.
+    func clamped() -> ThresholdConfig {
+        let cn = max(1,  min(98, caution))
+        let wn = max(cn + 1, min(99, warning))
+        let cr = max(wn + 1, min(100, critical))
+        return ThresholdConfig(caution: cn, warning: wn, critical: cr)
     }
 }
 
@@ -165,6 +188,7 @@ struct AppSettings: Codable, Sendable {
     var pollIntervalActiveSeconds: Int = 60
     var pollIntervalInactiveSeconds: Int = 300
     var launchAtLogin: Bool = false
+    var thresholdCaution: Int = 50
     var thresholdWarning: Int = 80
     var thresholdCritical: Int = 95
     var usageDisplayMode: UsageDisplayMode = .used
@@ -174,12 +198,39 @@ struct AppSettings: Codable, Sendable {
     /// ThresholdLevel.rawValue → hex (#RRGGBB). nil 또는 누락 시 system default 사용.
     var colorOverrides: [String: String] = [:]
 
+    // MARK: - Display extras
+    /// 메뉴바 텍스트 앞 prefix. 비어있으면 표시 안 함. (mock: "cc")
+    var menuBarPrefix: String = ""
+    /// Behavior 카드 토글들
+    var iconAnimation: Bool = false
+    var blinkOnChange: Bool = true
+    var hoverDetail: Bool = true
+
+    // MARK: - System extras
+    /// Startup 카드
+    var startInBackground: Bool = true
+    var autoUpdateCheck: Bool = false
+    /// Sync 카드
+    var keychainSync: Bool = true
+    var iCloudBackup: Bool = false
+    var debugLogEnabled: Bool = false
+
     static let defaults = AppSettings()
+
+    /// 임계치 3구간 구조체. UI/계산 모두 이 값만 보면 됨.
+    var thresholdConfig: ThresholdConfig {
+        ThresholdConfig(caution: thresholdCaution,
+                        warning: thresholdWarning,
+                        critical: thresholdCritical).clamped()
+    }
 
     enum CodingKeys: String, CodingKey {
         case pollIntervalActiveSeconds, pollIntervalInactiveSeconds, launchAtLogin
-        case thresholdWarning, thresholdCritical, usageDisplayMode
+        case thresholdCaution, thresholdWarning, thresholdCritical, usageDisplayMode
         case usageVisibility, menuBarStyle, timeFormat, colorOverrides
+        case menuBarPrefix, iconAnimation, blinkOnChange, hoverDetail
+        case startInBackground, autoUpdateCheck
+        case keychainSync, iCloudBackup, debugLogEnabled
     }
 
     init() {}
@@ -189,6 +240,7 @@ struct AppSettings: Codable, Sendable {
         pollIntervalActiveSeconds = try c.decodeIfPresent(Int.self, forKey: .pollIntervalActiveSeconds) ?? 60
         pollIntervalInactiveSeconds = try c.decodeIfPresent(Int.self, forKey: .pollIntervalInactiveSeconds) ?? 300
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
+        thresholdCaution = try c.decodeIfPresent(Int.self, forKey: .thresholdCaution) ?? 50
         thresholdWarning = try c.decodeIfPresent(Int.self, forKey: .thresholdWarning) ?? 80
         thresholdCritical = try c.decodeIfPresent(Int.self, forKey: .thresholdCritical) ?? 95
         usageDisplayMode = try c.decodeIfPresent(UsageDisplayMode.self, forKey: .usageDisplayMode) ?? .used
@@ -196,5 +248,14 @@ struct AppSettings: Codable, Sendable {
         menuBarStyle = try c.decodeIfPresent(MenuBarStyle.self, forKey: .menuBarStyle) ?? .percent
         timeFormat = try c.decodeIfPresent(TimeFormatStyle.self, forKey: .timeFormat) ?? .twelveHour
         colorOverrides = try c.decodeIfPresent([String: String].self, forKey: .colorOverrides) ?? [:]
+        menuBarPrefix = try c.decodeIfPresent(String.self, forKey: .menuBarPrefix) ?? ""
+        iconAnimation = try c.decodeIfPresent(Bool.self, forKey: .iconAnimation) ?? false
+        blinkOnChange = try c.decodeIfPresent(Bool.self, forKey: .blinkOnChange) ?? true
+        hoverDetail = try c.decodeIfPresent(Bool.self, forKey: .hoverDetail) ?? true
+        startInBackground = try c.decodeIfPresent(Bool.self, forKey: .startInBackground) ?? true
+        autoUpdateCheck = try c.decodeIfPresent(Bool.self, forKey: .autoUpdateCheck) ?? false
+        keychainSync = try c.decodeIfPresent(Bool.self, forKey: .keychainSync) ?? true
+        iCloudBackup = try c.decodeIfPresent(Bool.self, forKey: .iCloudBackup) ?? false
+        debugLogEnabled = try c.decodeIfPresent(Bool.self, forKey: .debugLogEnabled) ?? false
     }
 }

@@ -26,8 +26,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let win = NSWindow(contentViewController: host)
         win.title = "CCMeter 설정"
         win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        win.setContentSize(NSSize(width: 820, height: 560))
-        win.minSize = NSSize(width: 760, height: 500)
+        win.setContentSize(NSSize(width: 920, height: 680))
+        win.minSize = NSSize(width: 720, height: 480)
         win.center()
         win.isReleasedWhenClosed = false
         win.delegate = self
