@@ -26,6 +26,7 @@ struct AccountMenuView: View {
                                 visibility: settings.settings.usageVisibility,
                                 overrides: settings.settings.colorOverrides,
                                 timeFormat: settings.settings.timeFormat,
+                                thresholds: settings.settings.thresholdConfig,
                                 onSwitch: acc.id == manager.activeAccountID
                                     ? nil
                                     : { handleSwitch(to: acc.id) },

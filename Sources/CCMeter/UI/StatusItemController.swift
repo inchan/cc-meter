@@ -13,6 +13,8 @@ final class StatusItemController {
     private let settings: AppSettingsStore
     private var cancellables: Set<AnyCancellable> = []
     private var lastImageKey: String?
+    private var pulseTimer: Timer?
+    private var pulsePhase: Double = 0
 
     init(manager: AccountManager, monitor: UsageMonitor, settings: AppSettingsStore) {
         self.manager = manager
@@ -84,32 +86,124 @@ final class StatusItemController {
             .map { s.usageDisplayMode.display(utilization: $0.fiveHourUtilization) }
         let sevenDisplay: Int? = (s.usageVisibility.showsWeekly ? snap : nil)
             .flatMap { sn in sn.sevenDayUtilization.map { s.usageDisplayMode.display(utilization: $0) } }
-        let fLevel = (s.usageVisibility.showsSession ? snap : nil).map(\.fiveHourLevel.rawValue) ?? "-"
-        let sLevel = (s.usageVisibility.showsWeekly ? snap : nil).map(\.sevenDayLevel.rawValue) ?? "-"
-        let warning = activeNeedsAttention
-        let key = "\(acc?.initial ?? "?")|\(acc?.colorHex ?? "")|\(s.menuBarStyle.rawValue)|\(fiveDisplay.map(String.init) ?? "-")|\(fLevel)|\(sevenDisplay.map(String.init) ?? "-")|\(sLevel)|\(s.colorOverrides.description)|w=\(warning)"
+        let cfg = s.thresholdConfig
+        let fiveLv = (s.usageVisibility.showsSession ? snap : nil)
+            .map { ThresholdLevel.from(percent: $0.fiveHourUtilization, thresholds: cfg) }
+        let sevenLv = (s.usageVisibility.showsWeekly ? snap : nil)
+            .flatMap { sn in sn.sevenDayUtilization.map { ThresholdLevel.from(percent: $0, thresholds: cfg) } }
+        let fLevel = fiveLv?.rawValue ?? "-"
+        let sLevel = sevenLv?.rawValue ?? "-"
+        let key = "\(acc?.initial ?? "?")|\(acc?.colorHex ?? "")|\(s.menuBarStyle.rawValue)|\(fiveDisplay.map(String.init) ?? "-")|\(fLevel)|\(sevenDisplay.map(String.init) ?? "-")|\(sLevel)|\(s.colorOverrides.description)|\(cfg.caution)/\(cfg.warning)/\(cfg.critical)"
+        // Behavior 토글 효과는 매번 적용 (key 변동과 무관) — pulse on/off, tooltip 갱신
+        applyBehavior(button: button, account: acc, usage: snap,
+                      fiveLv: fiveLv, sevenLv: sevenLv,
+                      fiveDisplay: fiveDisplay, sevenDisplay: sevenDisplay, settings: s)
         if key == lastImageKey { return }
+        let prevKey = lastImageKey
         lastImageKey = key
         button.image = StatusIconRenderer.renderStatusBar(
             initial: acc?.initial ?? "?",
             hex: acc?.colorHex ?? "#888888",
             fiveHour: fiveDisplay,
-            fiveLevel: s.usageVisibility.showsSession ? snap?.fiveHourLevel : nil,
+            fiveLevel: fiveLv,
             sevenDay: sevenDisplay,
-            sevenLevel: s.usageVisibility.showsWeekly ? snap?.sevenDayLevel : nil,
+            sevenLevel: sevenLv,
             style: s.menuBarStyle,
-            colorOverrides: s.colorOverrides,
-            warning: warning
+            colorOverrides: s.colorOverrides
         )
-        button.toolTip = warning
-            ? "🔐 Keychain 접근 권한 필요 — 메뉴를 열어 새로고침으로 다시 요청하세요"
-            : nil
+        // blinkOnChange — 첫 렌더(prevKey nil) 가 아니라 데이터/설정 변동 시에만 깜빡
+        if s.blinkOnChange, prevKey != nil {
+            button.alphaValue = 0.25
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.35
+                ctx.allowsImplicitAnimation = true
+                button.animator().alphaValue = pulseTimer == nil ? 1.0 : currentPulseAlpha()
+            }
+        }
     }
 
-    /// 활성 계정에 사용자 개입이 필요한 상태 (현재는 Keychain 권한 거부).
-    private var activeNeedsAttention: Bool {
-        guard let id = manager.activeAccountID else { return false }
-        return monitor.lastError[id] == "keychain_denied"
+    /// Behavior 카드 토글 3개 효과 적용.
+    private func applyBehavior(button: NSStatusBarButton,
+                               account: Account?,
+                               usage: UsageSnapshot?,
+                               fiveLv: ThresholdLevel?,
+                               sevenLv: ThresholdLevel?,
+                               fiveDisplay: Int?,
+                               sevenDisplay: Int?,
+                               settings s: AppSettings) {
+        // hoverDetail — tooltip 상세 정보 토글
+        button.toolTip = makeTooltip(account: account, usage: usage,
+                                     fiveLv: fiveLv, sevenLv: sevenLv,
+                                     fiveDisplay: fiveDisplay, sevenDisplay: sevenDisplay,
+                                     detail: s.hoverDetail, timeFormat: s.timeFormat)
+
+        // iconAnimation — 1.6s 호흡 펄스. off면 정지.
+        if s.iconAnimation {
+            if pulseTimer == nil { startPulse(button: button) }
+        } else {
+            stopPulse(button: button)
+        }
+    }
+
+    private func startPulse(button: NSStatusBarButton) {
+        pulsePhase = 0
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let btn = self.statusItem.button else { return }
+                self.pulsePhase += 1.0 / 30.0
+                btn.alphaValue = self.currentPulseAlpha()
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        pulseTimer = t
+    }
+
+    private func stopPulse(button: NSStatusBarButton) {
+        pulseTimer?.invalidate()
+        pulseTimer = nil
+        pulsePhase = 0
+        button.alphaValue = 1.0
+    }
+
+    /// 1.6s 주기 sin 펄스. 진폭 0.55..1.0.
+    private func currentPulseAlpha() -> Double {
+        let period = 1.6
+        let phase = (pulsePhase.truncatingRemainder(dividingBy: period)) / period
+        // sin 0..2π
+        let s = sin(phase * 2 * .pi)
+        return 0.775 + 0.225 * s   // 0.55 .. 1.0
+    }
+
+    private func makeTooltip(account: Account?,
+                             usage: UsageSnapshot?,
+                             fiveLv: ThresholdLevel?,
+                             sevenLv: ThresholdLevel?,
+                             fiveDisplay: Int?,
+                             sevenDisplay: Int?,
+                             detail: Bool,
+                             timeFormat: TimeFormatStyle) -> String {
+        let name = account?.label ?? "CCMeter"
+        if !detail {
+            return name
+        }
+        var lines: [String] = [name]
+        if let p = fiveDisplay {
+            var line = "Session: \(p)%"
+            if let r = usage?.fiveHourResetsAt {
+                line += " · reset \(TimeFormat.format(r, style: timeFormat))"
+            }
+            lines.append(line)
+        }
+        if let p = sevenDisplay {
+            var line = "Weekly: \(p)%"
+            if let r = usage?.sevenDayResetsAt {
+                line += " · reset \(TimeFormat.format(r, style: timeFormat))"
+            }
+            lines.append(line)
+        }
+        _ = fiveLv; _ = sevenLv  // 색 매핑은 메뉴바 image에서. tooltip은 텍스트만.
+        return lines.joined(separator: "\n")
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {

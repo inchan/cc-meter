@@ -4,6 +4,15 @@ import SwiftUI
 /// 메뉴바 드롭다운과 설정창에서 공통 사용.
 enum ProgressLayout { case auto, verticalOnly }
 
+private enum CardTokens {
+    static let claudeAccent = Color(red: 0.80, green: 0.47, blue: 0.36)
+    static let claudeAccentSoft = Color(red: 0.80, green: 0.47, blue: 0.36).opacity(0.14)
+    static let activeBadgeBG = Color(red: 0.80, green: 0.47, blue: 0.36).opacity(0.16)
+    static let cardFill = Color(nsColor: .textBackgroundColor)
+    static let cardStroke = Color.primary.opacity(0.08)
+    static let trackColor = Color.primary.opacity(0.08)
+}
+
 struct AccountUsageCard: View {
     let account: Account
     let isActive: Bool
@@ -13,41 +22,53 @@ struct AccountUsageCard: View {
     let visibility: UsageVisibility
     let overrides: [String: String]
     let timeFormat: TimeFormatStyle
+    var thresholds: ThresholdConfig = .default
     let onSwitch: (() -> Void)?
     var progressLayout: ProgressLayout = .auto
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header
             progressRows
-            if let err = error, !errorText(err).isEmpty {
-                Text(errorText(err))
-                    .font(AppFonts.swiftUI(size: 10, weight: .medium))
-                    .tracking(0.4)
-                    .foregroundColor(.orange)
+            if let err = error, usage == nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text(err == "unauthorized" ? "재로그인 필요" : "조회 실패: \(err)")
+                        .font(AppFonts.swiftUI(size: 10, weight: .medium))
+                }
+                .foregroundColor(.orange)
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 8)
-            .fill(Color.secondary.opacity(0.08)))
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(CardTokens.cardFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isActive ? CardTokens.claudeAccent.opacity(0.45) : CardTokens.cardStroke,
+                        lineWidth: isActive ? 1.5 : 1)
+        )
+        .shadow(color: Color.black.opacity(isActive ? 0.06 : 0.03),
+                radius: isActive ? 4 : 2, x: 0, y: 1)
     }
 
     @ViewBuilder
     private var progressRows: some View {
         let session = visibility.showsSession ? sessionRow : nil
         let weekly  = visibility.showsWeekly ? weeklyRow : nil
-        // 둘 다일 때만 가로 우선, 폭 부족 시 세로. 한 쪽만이면 그대로 단일.
         if let s = session, let w = weekly {
             switch progressLayout {
             case .verticalOnly:
-                VStack(alignment: .leading, spacing: 8) { s; w }
+                VStack(alignment: .leading, spacing: 10) { s; w }
             case .auto:
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
+                    HStack(alignment: .top, spacing: 18) {
                         s.frame(maxWidth: .infinity, alignment: .leading)
                         w.frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    VStack(alignment: .leading, spacing: 8) { s; w }
+                    VStack(alignment: .leading, spacing: 10) { s; w }
                 }
             }
         } else if let s = session {
@@ -57,70 +78,82 @@ struct AccountUsageCard: View {
         }
     }
 
-    /// keychain_denied 는 usage 가 있어도 stale 표시이므로 항상 안내. unauthorized 는
-    /// 캐시된 usage 만 있을 때 노출 의미가 약해 기존처럼 usage 없을 때만 노출.
-    private func errorText(_ err: String) -> String {
-        switch err {
-        case "keychain_denied":
-            return "🔐 Keychain 접근 권한 필요 — '새로고침' 으로 다시 요청하세요"
-        case "unauthorized":
-            return usage == nil ? "재로그인 필요" : ""
-        default:
-            return usage == nil ? "조회 실패: \(err)" : ""
-        }
-    }
-
     private var sessionRow: UsageProgressRow {
-        UsageProgressRow(title: "세션 사용량",
-                         utilization: usage?.fiveHourUtilization,
-                         resetsAt: usage?.fiveHourResetsAt,
-                         level: usage?.fiveHourLevel,
-                         mode: mode,
-                         overrides: overrides,
-                         timeFormat: timeFormat)
+        let pct = usage?.fiveHourUtilization
+        return UsageProgressRow(
+            title: "세션 사용량",
+            utilization: pct,
+            resetsAt: usage?.fiveHourResetsAt,
+            level: pct.map { ThresholdLevel.from(percent: $0, thresholds: thresholds) },
+            mode: mode,
+            overrides: overrides,
+            timeFormat: timeFormat
+        )
     }
 
     private var weeklyRow: UsageProgressRow {
-        UsageProgressRow(title: "주간 사용량",
-                         utilization: usage?.sevenDayUtilization,
-                         resetsAt: usage?.sevenDayResetsAt,
-                         level: usage?.sevenDayLevel,
-                         mode: mode,
-                         overrides: overrides,
-                         timeFormat: timeFormat)
+        let pct = usage?.sevenDayUtilization
+        return UsageProgressRow(
+            title: "주간 사용량",
+            utilization: pct,
+            resetsAt: usage?.sevenDayResetsAt,
+            level: pct.map { ThresholdLevel.from(percent: $0, thresholds: thresholds) },
+            mode: mode,
+            overrides: overrides,
+            timeFormat: timeFormat
+        )
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 5) {
-            Image(nsImage: StatusIconRenderer.render(initial: account.initial,
-                                                     hex: account.colorHex, size: 16.8,
-                                                     warning: error == "keychain_denied"))
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .center, spacing: 10) {
+            avatar
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(account.label)
-                        .font(AppFonts.swiftUI(size: 13, weight: .semibold))
-                        .tracking(0.4)
+                        .font(AppFonts.heading(size: 14, weight: .semibold))
+                        .lineLimit(1)
                     if isActive {
-                        Text("활성화")
-                            .font(AppFonts.swiftUI(size: 10, weight: .medium))
-                            .tracking(0.4)
-                            .foregroundColor(.green)
+                        Text("ACTIVE")
+                            .font(AppFonts.mono(size: 9, weight: .bold))
+                            .tracking(0.6)
+                            .foregroundColor(CardTokens.claudeAccent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(CardTokens.activeBadgeBG)
+                            )
                     }
                     Spacer(minLength: 4)
                     if !isActive, let onSwitch {
-                        Button("전환", action: onSwitch)
-                            .buttonStyle(.bordered)
-                            .controlSize(.mini)
-                            .font(AppFonts.swiftUI(size: 10, weight: .medium))
+                        Button(action: onSwitch) {
+                            Text("전환")
+                                .font(AppFonts.swiftUI(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(
+                                    Capsule().fill(CardTokens.claudeAccent)
+                                )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 Text(account.emailAddress)
-                    .font(AppFonts.swiftUI(size: 10, weight: .medium))
-                    .tracking(0.4)
+                    .font(AppFonts.swiftUI(size: 11))
                     .foregroundColor(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }
         }
+    }
+
+    private var avatar: some View {
+        Image(nsImage: StatusIconRenderer.render(initial: account.initial,
+                                                 hex: account.colorHex, size: 28))
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
@@ -135,23 +168,21 @@ struct UsageProgressRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 Text(title)
                     .font(AppFonts.swiftUI(size: 11, weight: .medium))
-                    .tracking(0.4)
+                    .foregroundColor(.secondary)
                 Spacer()
                 Text(percentText)
-                    .font(AppFonts.swiftUI(size: 11, weight: .semibold))
-                    .tracking(0.4)
+                    .font(AppFonts.mono(size: 12, weight: .semibold))
                     .foregroundColor(level?.color(overrides: overrides) ?? .secondary)
             }
             ProgressBarShape(percent: utilization ?? 0,
                              color: (level ?? .healthy).color(overrides: overrides))
-                .frame(height: 2)
+                .frame(height: 4)
             if let reset = resetsAt {
                 Text(formatResetTime(reset))
-                    .font(AppFonts.swiftUI(size: 10, weight: .medium))
-                    .tracking(0.4)
+                    .font(AppFonts.swiftUI(size: 10))
                     .foregroundColor(.secondary)
             }
         }
@@ -173,9 +204,6 @@ struct UsageProgressRow: View {
 }
 
 /// 시간 포맷 단일 정의원.
-/// - 24h: "HH:mm" (locale 무관)
-/// - 12h + KO: "오후 10:00"
-/// - 12h + 그 외: "10:00 PM"
 enum TimeFormat {
     static func format(_ date: Date, style: TimeFormatStyle,
                        locale: Locale = .current) -> String {
@@ -199,10 +227,15 @@ struct ProgressBarShape: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.secondary.opacity(0.18))
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(color)
+                Capsule()
+                    .fill(CardTokens.trackColor)
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [color, color.opacity(0.82)],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
                     .frame(width: geo.size.width * CGFloat(min(max(percent, 0), 100)) / 100)
             }
         }
