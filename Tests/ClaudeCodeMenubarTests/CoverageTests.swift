@@ -1,5 +1,5 @@
 import XCTest
-@testable import CCMeter
+@testable import ClaudeCodeMenubar
 import Foundation
 
 /// 커버리지 확장 — Storage/Network/ClaudeIntegration 의 IO 의존 유닛.
@@ -34,7 +34,7 @@ final class PathsTests: XCTestCase {
         XCTAssertFalse(Paths.home.path.isEmpty)
         XCTAssertTrue(Paths.claudeConfig.path.hasSuffix(".claude.json"))
         XCTAssertTrue(Paths.claudeCredentials.path.hasSuffix(".credentials.json"))
-        XCTAssertTrue(Paths.appRoot.path.hasSuffix("/.ccmeter"))
+        XCTAssertTrue(Paths.appRoot.path.hasSuffix("/.claude-code-menubar"))
         XCTAssertTrue(Paths.accountsFile.path.hasSuffix("/accounts.json"))
         XCTAssertTrue(Paths.settingsFile.path.hasSuffix("/settings.json"))
         XCTAssertTrue(Paths.snapshotsDir.path.hasSuffix("/snapshots"))
@@ -480,8 +480,8 @@ final class ClaudeProcessGuardMatcherTests: XCTestCase {
         XCTAssertTrue(g.matchesClaudeProcess("/usr/local/bin/node /opt/claude/cli.js"))
     }
 
-    func testRejectsCCMeter() {
-        XCTAssertFalse(g.matchesClaudeProcess("/Users/x/Applications/CCMeter.app/Contents/MacOS/CCMeter"))
+    func testRejectsClaudeCodeMenubar() {
+        XCTAssertFalse(g.matchesClaudeProcess("/Users/x/Applications/ClaudeCodeMenubar.app/Contents/MacOS/ClaudeCodeMenubar"))
     }
 
     func testRejectsClaudeDotAppDesktop() {

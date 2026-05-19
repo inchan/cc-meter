@@ -1007,7 +1007,7 @@ private struct SystemPanel: View {
                                     error = nil
                                 } catch {
                                     self.error = LaunchAtLoginService.requiresUserApproval
-                                        ? "시스템 설정 → 일반 → 로그인 항목 에서 CCMeter 허용 필요"
+                                        ? "시스템 설정 → 일반 → 로그인 항목 에서 Claude Code Menubar 허용 필요"
                                         : "설정 실패: \(String(describing: error))"
                                 }
                                 statusTick += 1
@@ -1032,6 +1032,18 @@ private struct SystemPanel: View {
                         CCToggle(isOn: Binding(
                             get: { settings.settings.keychainSync },
                             set: { settings.setKeychainSync($0) }
+                        ))
+                    }
+                    V3Row(label: "폴링 시 Keychain 사용") {
+                        CCToggle(isOn: Binding(
+                            get: { settings.settings.useKeychainLiveTokens },
+                            set: { settings.setUseKeychainLiveTokens($0) }
+                        ))
+                    }
+                    V3Row(label: "토큰 자동 refresh") {
+                        CCToggle(isOn: Binding(
+                            get: { settings.settings.useAutoRefresh },
+                            set: { settings.setUseAutoRefresh($0) }
                         ))
                     }
                     V3Row(label: "iCloud 설정 백업") {
@@ -1083,7 +1095,7 @@ private struct SystemPanel: View {
             }
 
             if LaunchAtLoginService.requiresUserApproval {
-                Banner(text: "⚠️ 시스템 설정 → 일반 → 로그인 항목 에서 CCMeter 활성화가 필요합니다", kind: .error)
+                Banner(text: "⚠️ 시스템 설정 → 일반 → 로그인 항목 에서 Claude Code Menubar 활성화가 필요합니다", kind: .error)
                 CCButton(label: "시스템 설정 → 로그인 항목 열기", style: .ghost) {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
                         NSWorkspace.shared.open(url)
@@ -1139,7 +1151,7 @@ private struct SystemPanel: View {
 
     private func exportSettings() {
         let panel = NSSavePanel()
-        panel.title = "Export CCMeter settings"
+        panel.title = "Export Claude Code Menubar settings"
         panel.nameFieldStringValue = "ccmeter-settings.json"
         panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK, let dest = panel.url else { return }
@@ -1155,7 +1167,7 @@ private struct SystemPanel: View {
 
     private func importSettings() {
         let panel = NSOpenPanel()
-        panel.title = "Import CCMeter settings"
+        panel.title = "Import Claude Code Menubar settings"
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -1227,7 +1239,7 @@ private struct AboutPanel: View {
                             .foregroundColor(.white)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("CCMeter")
+                        Text("Claude Code Menubar")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(CC.ivory)
                         Text("Claude usage meter for macOS menubar")

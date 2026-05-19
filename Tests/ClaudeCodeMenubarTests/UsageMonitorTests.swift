@@ -1,5 +1,5 @@
 import XCTest
-@testable import CCMeter
+@testable import ClaudeCodeMenubar
 import Foundation
 
 // MARK: - Mocks
@@ -71,6 +71,13 @@ private final class StubClock: ClockProtocol, @unchecked Sendable {
     func now() -> Date { current }
 }
 
+/// 테스트용 — 네트워크 안 타고 invalid_grant 반환 (pre-refresh / 401-retry 경로 차단).
+private struct StubOAuthRefresh: ClaudeOAuthRefreshProtocol {
+    func refresh(refreshToken: String, existing: ClaudeAiOAuth) async throws -> ClaudeAiOAuth {
+        throw OAuthRefreshError.invalidGrant("stub")
+    }
+}
+
 // MARK: - UsageMonitor tests
 
 @MainActor
@@ -112,7 +119,8 @@ final class UsageMonitorTests: XCTestCase {
                                snapshotStore: snap,
                                settingsStore: settings,
                                clock: SystemClock(),
-                               liveCredsReadRaw: { credsData })
+                               liveCredsReadRaw: { credsData },
+                               oauthRefresh: StubOAuthRefresh())
         return (am, mon, repo, snap, client, settings)
     }
 

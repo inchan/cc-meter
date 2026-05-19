@@ -72,6 +72,8 @@ final class AppSettingsStore: ObservableObject {
     func setKeychainSync(_ on: Bool) { update { $0.keychainSync = on } }
     func setICloudBackup(_ on: Bool) { update { $0.iCloudBackup = on } }
     func setDebugLogEnabled(_ on: Bool) { update { $0.debugLogEnabled = on } }
+    func setUseKeychainLiveTokens(_ on: Bool) { update { $0.useKeychainLiveTokens = on } }
+    func setUseAutoRefresh(_ on: Bool) { update { $0.useAutoRefresh = on } }
 
     /// 외부 파일(import)로부터 받은 AppSettings 로 전체 덮어쓰기.
     func replaceAll(_ next: AppSettings) throws {

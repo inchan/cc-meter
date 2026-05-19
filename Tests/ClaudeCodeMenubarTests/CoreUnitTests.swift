@@ -1,5 +1,5 @@
 import XCTest
-@testable import CCMeter
+@testable import ClaudeCodeMenubar
 
 // MARK: - FNV
 

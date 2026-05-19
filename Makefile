@@ -1,6 +1,6 @@
 SHELL := /bin/bash
-APP_NAME := CCMeter
-DISPLAY_NAME := CCMeter
+APP_NAME := ClaudeCodeMenubar
+DISPLAY_NAME := Claude Code Menubar
 BUILD_CONFIG := release
 BIN_PATH := .build/$(BUILD_CONFIG)/$(APP_NAME)
 APP_BUNDLE := build/$(DISPLAY_NAME).app

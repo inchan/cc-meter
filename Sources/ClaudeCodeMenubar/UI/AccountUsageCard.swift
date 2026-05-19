@@ -165,6 +165,10 @@ struct AccountUsageCard: View {
             return "🔐 Keychain 접근 권한 필요 — '새로고침' 으로 다시 요청"
         case "unauthorized":
             return usage == nil ? "재로그인 필요" : ""
+        case "invalid_grant":
+            return "🔑 refresh 만료 — Claude Code 로 재로그인 필요"
+        case "rate_limited":
+            return usage == nil ? "잠시 후 재시도" : ""
         default:
             return usage == nil ? "조회 실패: \(err)" : ""
         }

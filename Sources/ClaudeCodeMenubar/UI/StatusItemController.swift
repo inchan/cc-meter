@@ -197,7 +197,7 @@ final class StatusItemController {
                              sevenDisplay: Int?,
                              detail: Bool,
                              timeFormat: TimeFormatStyle) -> String {
-        let name = account?.label ?? "CCMeter"
+        let name = account?.label ?? "Claude Code Menubar"
         if !detail {
             return name
         }

@@ -15,6 +15,10 @@ final class UsageMonitor: ObservableObject {
     private let clock: ClockProtocol
     private let liveCredsReadRaw: @Sendable () -> Data?
     private let keychainProbe: @Sendable () -> ClaudeKeychainCredentials.AccessState
+    private let oauthRefresh: ClaudeOAuthRefreshProtocol
+
+    /// per-account refresh 직렬화. 동일 계정 동시 refresh 방지.
+    private var refreshInFlight: Set<AccountID> = []
 
     private var activeTimer: Timer?
     private var inactiveTimer: Timer?
@@ -27,7 +31,8 @@ final class UsageMonitor: ObservableObject {
          settingsStore: SettingsStoreProtocol = SettingsStore(),
          clock: ClockProtocol = SystemClock(),
          liveCredsReadRaw: @Sendable @escaping () -> Data? = { try? ClaudeLiveCredentials.readRaw() },
-         keychainProbe: @Sendable @escaping () -> ClaudeKeychainCredentials.AccessState = ClaudeKeychainCredentials.readDetailed) {
+         keychainProbe: @Sendable @escaping () -> ClaudeKeychainCredentials.AccessState = ClaudeKeychainCredentials.readDetailed,
+         oauthRefresh: ClaudeOAuthRefreshProtocol = ClaudeOAuthRefresh()) {
         self.accountManager = accountManager
         self.client = client
         self.snapshotStore = snapshotStore
@@ -35,6 +40,7 @@ final class UsageMonitor: ObservableObject {
         self.clock = clock
         self.liveCredsReadRaw = liveCredsReadRaw
         self.keychainProbe = keychainProbe
+        self.oauthRefresh = oauthRefresh
         // init 시점에 accounts 가 비어 있어도 OK — 아래 observer 가 reload 시 자동 채움.
         loadCachedSnapshots()
         observeAccountChanges()
@@ -155,13 +161,14 @@ final class UsageMonitor: ObservableObject {
     private func refresh(accountID: AccountID) async {
         Log.usage.info("[REFRESH enter] id=\(accountID, privacy: .public) backoff=\(self.nextEligibleAt[accountID]?.timeIntervalSinceNow ?? -1)")
         let isActive = accountManager?.activeAccountID == accountID
-        // 활성 계정은 Keychain 권한 거부를 우선 감지. stale 파일 토큰으로 fallback 하면
-        // 영구 401 + 화면에 어제 사용량이 그대로 남는 회귀가 발생함.
-        if isActive {
+        let settings = settingsStore.load()
+        let useKeychain = settings.useKeychainLiveTokens
+        let autoRefresh = settings.useAutoRefresh
+
+        if isActive && useKeychain {
             if case .accessDenied(let status) = keychainProbe() {
                 Log.usage.error("[REFRESH keychain-denied] id=\(accountID, privacy: .public) status=\(status)")
                 setError(accountID, "keychain_denied")
-                // 짧은 backoff — 사용자가 popover 를 다시 열거나 새로고침 누르면 즉시 재시도.
                 nextEligibleAt[accountID] = clock.now().addingTimeInterval(15)
                 return
             }
@@ -170,28 +177,20 @@ final class UsageMonitor: ObservableObject {
             Log.usage.info("[REFRESH backoff-skip] id=\(accountID, privacy: .public)")
             return
         }
-        // 활성 계정은 ~/.claude/.credentials.json 의 최신 토큰 사용 (Claude Code 가
-        // 주기적으로 refresh 하므로 snapshot 의 stale 토큰 사용 시 영구 401 위험).
-        let token: String
-        if isActive,
-           let liveData = liveActiveCredentials(),
-           let live = try? JSON.decode(ClaudeCredentialsRoot.self, from: liveData) {
-            token = live.claudeAiOauth.accessToken
-            Log.usage.info("[REFRESH live-token] id=\(accountID, privacy: .public)")
-            // 활성 계정 snapshot 도 latest 로 sync (다음 스위치 시 활용)
-            if let cur = try? snapshotStore.read(for: accountID) {
-                let newSnap = ClaudeProfileSnapshot(oauthAccountJSON: cur.oauthAccountJSON,
-                                                    credentialsJSON: liveData)
-                try? snapshotStore.write(newSnap, for: accountID)
-            }
-        } else {
-            guard let snap = try? snapshotStore.read(for: accountID),
-                  let creds = try? JSON.decode(ClaudeCredentialsRoot.self, from: snap.credentialsJSON)
-            else { return }
-            token = creds.claudeAiOauth.accessToken
+
+        guard var creds = loadCredentials(accountID: accountID, isActive: isActive, useKeychain: useKeychain) else {
+            return
         }
+
+        // 사전 refresh — expiresAt 까지 5분 이내면 호출 전 갱신.
+        if autoRefresh && shouldPreRefresh(creds: creds) {
+            if let refreshed = await tryRefresh(accountID: accountID, current: creds, isActive: isActive) {
+                creds = refreshed
+            }
+        }
+
         do {
-            let usage = try await client.fetch(accessToken: token)
+            let usage = try await client.fetch(accessToken: creds.accessToken)
             Log.usage.info("[REFRESH ok] id=\(accountID, privacy: .public) 5h=\(usage.fiveHourUtilization) 7d=\(usage.sevenDayUtilization ?? -1)")
             if !isSameVisible(usage, snapshots[accountID]) {
                 snapshots[accountID] = usage
@@ -199,9 +198,21 @@ final class UsageMonitor: ObservableObject {
             }
             if lastError[accountID] != nil { lastError[accountID] = nil }
         } catch UsageClientError.unauthorized {
-            Log.usage.error("[REFRESH 401] id=\(accountID, privacy: .public)")
+            Log.usage.error("[REFRESH 401] id=\(accountID, privacy: .public) autoRefresh=\(autoRefresh)")
+            // 401 → autoRefresh 켜져있으면 1회 refresh 후 재시도.
+            if autoRefresh, let refreshed = await tryRefresh(accountID: accountID, current: creds, isActive: isActive) {
+                do {
+                    let usage = try await client.fetch(accessToken: refreshed.accessToken)
+                    Log.usage.info("[REFRESH ok-after-refresh] id=\(accountID, privacy: .public)")
+                    snapshots[accountID] = usage
+                    try? snapshotStore.writeUsage(usage, for: accountID)
+                    if lastError[accountID] != nil { lastError[accountID] = nil }
+                    return
+                } catch {
+                    Log.usage.error("[REFRESH retry-fail] id=\(accountID, privacy: .public) err=\(String(describing: error), privacy: .public)")
+                }
+            }
             setError(accountID, "unauthorized")
-            // 1분 backoff. Claude Code 명령 한 번이면 자동 refresh → 다음 폴링에서 회복.
             nextEligibleAt[accountID] = clock.now().addingTimeInterval(60)
         } catch UsageClientError.rateLimited(let retry) {
             let wait = retry.flatMap { max($0, 30) } ?? 60
@@ -213,6 +224,85 @@ final class UsageMonitor: ObservableObject {
             setError(accountID, String(describing: error))
             nextEligibleAt[accountID] = clock.now().addingTimeInterval(120)
         }
+    }
+
+    /// 토큰 소스 결정 — 활성/비활성 + Keychain 사용 여부에 따라.
+    private func loadCredentials(accountID: AccountID, isActive: Bool, useKeychain: Bool) -> ClaudeAiOAuth? {
+        if isActive, useKeychain,
+           let liveData = liveActiveCredentials(),
+           let live = try? JSON.decode(ClaudeCredentialsRoot.self, from: liveData) {
+            Log.usage.info("[CREDS keychain] id=\(accountID, privacy: .public)")
+            if let cur = try? snapshotStore.read(for: accountID) {
+                let newSnap = ClaudeProfileSnapshot(oauthAccountJSON: cur.oauthAccountJSON, credentialsJSON: liveData)
+                try? snapshotStore.write(newSnap, for: accountID)
+            }
+            return live.claudeAiOauth
+        }
+        if isActive && !useKeychain {
+            if let fileData = try? ClaudeCredentialsFile().readRaw(),
+               let live = try? JSON.decode(ClaudeCredentialsRoot.self, from: fileData) {
+                Log.usage.info("[CREDS file] id=\(accountID, privacy: .public)")
+                return live.claudeAiOauth
+            }
+            if let snap = try? snapshotStore.read(for: accountID),
+               let cred = try? JSON.decode(ClaudeCredentialsRoot.self, from: snap.credentialsJSON) {
+                Log.usage.info("[CREDS snapshot-fallback] id=\(accountID, privacy: .public)")
+                return cred.claudeAiOauth
+            }
+            return nil
+        }
+        // 비활성 — snapshot 만 사용
+        if let snap = try? snapshotStore.read(for: accountID),
+           let cred = try? JSON.decode(ClaudeCredentialsRoot.self, from: snap.credentialsJSON) {
+            return cred.claudeAiOauth
+        }
+        return nil
+    }
+
+    /// expiresAt 까지 5분 미만이면 true.
+    private func shouldPreRefresh(creds: ClaudeAiOAuth) -> Bool {
+        let nowMs = Int64(clock.now().timeIntervalSince1970 * 1000)
+        let marginMs: Int64 = 5 * 60 * 1000
+        return creds.expiresAt - nowMs < marginMs
+    }
+
+    /// refresh_token 으로 새 access_token 발급 + snapshot 갱신. 실패 시 nil.
+    /// 활성 계정의 .credentials.json 동시 갱신은 Claude Code 와 race 가능성이 있어 의도적으로 안 함.
+    private func tryRefresh(accountID: AccountID, current: ClaudeAiOAuth, isActive: Bool) async -> ClaudeAiOAuth? {
+        if refreshInFlight.contains(accountID) {
+            Log.usage.info("[REFRESH-TOKEN skip-inflight] id=\(accountID, privacy: .public)")
+            return nil
+        }
+        refreshInFlight.insert(accountID)
+        defer { refreshInFlight.remove(accountID) }
+
+        do {
+            let new = try await oauthRefresh.refresh(refreshToken: current.refreshToken, existing: current)
+            try saveRefreshedCredentials(accountID: accountID, new: new)
+            Log.usage.info("[REFRESH-TOKEN ok] id=\(accountID, privacy: .public)")
+            return new
+        } catch OAuthRefreshError.invalidGrant(let msg) {
+            Log.usage.error("[REFRESH-TOKEN invalid_grant] id=\(accountID, privacy: .public) msg=\(msg, privacy: .public)")
+            setError(accountID, "invalid_grant")
+            nextEligibleAt[accountID] = clock.now().addingTimeInterval(300)  // 5분 backoff — 재로그인 필요
+            return nil
+        } catch OAuthRefreshError.rateLimited(let retry) {
+            let wait = retry.flatMap { max($0, 60) } ?? 120
+            nextEligibleAt[accountID] = clock.now().addingTimeInterval(wait)
+            return nil
+        } catch {
+            Log.usage.error("[REFRESH-TOKEN fail] id=\(accountID, privacy: .public) err=\(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }
+
+    /// 새 credentials 를 snapshot 에 원자적 write. 기존 oauthAccount JSON 은 유지.
+    private func saveRefreshedCredentials(accountID: AccountID, new: ClaudeAiOAuth) throws {
+        let root = ClaudeCredentialsRoot(claudeAiOauth: new)
+        let credData = try JSON.encode(root)
+        let configData: Data = (try? snapshotStore.read(for: accountID)?.oauthAccountJSON) ?? Data("{}".utf8)
+        let snap = ClaudeProfileSnapshot(oauthAccountJSON: configData, credentialsJSON: credData)
+        try snapshotStore.write(snap, for: accountID)
     }
 
     private func liveActiveCredentials() -> Data? {

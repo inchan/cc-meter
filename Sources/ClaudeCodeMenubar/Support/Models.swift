@@ -214,6 +214,14 @@ struct AppSettings: Codable, Sendable {
     var keychainSync: Bool = true
     var iCloudBackup: Bool = false
     var debugLogEnabled: Bool = false
+    /// 활성 계정 폴링 시 Keychain 에서 live 토큰을 읽을지 여부.
+    /// false: 파일(`~/.claude/.credentials.json`) 만 사용 — Keychain 프롬프트 없음, 단 토큰 refresh 후
+    /// Claude Code 가 파일을 갱신하지 않으면 stale → 401 가능 (자동 backoff 후 복구 시도).
+    /// true: 기존 동작 — Keychain 우선 read (live 토큰 보장, 단 ACL prompt 발생 가능).
+    var useKeychainLiveTokens: Bool = false
+    /// 토큰 만료 임박 / 401 시 refresh_token 으로 자동 갱신. 비활성 계정도 항상 fresh 유지.
+    /// false 시 비활성 계정은 expiresAt 도달 후 영구 401 (스위치 전까지).
+    var useAutoRefresh: Bool = true
 
     static let defaults = AppSettings()
 
@@ -231,6 +239,7 @@ struct AppSettings: Codable, Sendable {
         case menuBarPrefix, iconAnimation, blinkOnChange, hoverDetail
         case startInBackground, autoUpdateCheck
         case keychainSync, iCloudBackup, debugLogEnabled
+        case useKeychainLiveTokens, useAutoRefresh
     }
 
     init() {}
@@ -257,5 +266,7 @@ struct AppSettings: Codable, Sendable {
         keychainSync = try c.decodeIfPresent(Bool.self, forKey: .keychainSync) ?? true
         iCloudBackup = try c.decodeIfPresent(Bool.self, forKey: .iCloudBackup) ?? false
         debugLogEnabled = try c.decodeIfPresent(Bool.self, forKey: .debugLogEnabled) ?? false
+        useKeychainLiveTokens = try c.decodeIfPresent(Bool.self, forKey: .useKeychainLiveTokens) ?? false
+        useAutoRefresh = try c.decodeIfPresent(Bool.self, forKey: .useAutoRefresh) ?? true
     }
 }

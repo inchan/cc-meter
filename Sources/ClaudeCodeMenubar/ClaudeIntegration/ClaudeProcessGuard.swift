@@ -25,7 +25,7 @@ struct ClaudeProcessGuard: ClaudeProcessGuardProtocol {
     func matchesClaudeProcess(_ cmd: String) -> Bool {
         // node /path/to/claude/cli.js ...  또는  /usr/local/bin/claude ...
         let lowered = cmd.lowercased()
-        // 우리 자신(CCMeter) 또는 기타 'claude' 문자열 포함 프로세스 제외
+        // 우리 자신(ClaudeCodeMenubar) 또는 기타 'claude' 문자열 포함 프로세스 제외
         if lowered.contains("ccmeter") { return false }
         if lowered.contains("claude code") { return false } // Claude.app
         // claude CLI 시그니처: 끝이 /claude 또는 .../cli.js (node 실행)

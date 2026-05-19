@@ -1,5 +1,5 @@
 import XCTest
-@testable import CCMeter
+@testable import ClaudeCodeMenubar
 
 /// Production 디렉토리(Paths) 를 건드리지 않는 범위에서 가능한 통합 흐름 검증.
 /// 진짜 UI(SwiftUI body) 와 SwitchTransaction 의 transactional 흐름은 hardcoded

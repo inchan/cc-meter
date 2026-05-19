@@ -4,7 +4,7 @@ import AppKit
 /// SwiftUI App + Settings scene 조합이 macOS 26 에서 AppDelegate 콜백을 호출하지 않는
 /// 케이스가 발생했음.
 @main
-enum CCMeterMain {
+enum ClaudeCodeMenubarMain {
     static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Paths.migrateLegacyAppRootIfNeeded()
         prepareAppRoot()
         enforceSingleInstance()
 
@@ -42,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 시작 시 자동 재등록. 실패해도 흐름 차단하지 않음.
         LaunchAtLoginService.reconcileAtLaunch(desiredOn: settings.settings.launchAtLogin)
 
-        Log.app.info("CCMeter started (bundleId=\(Bundle.main.bundleIdentifier ?? "?"))")
+        Log.app.info("ClaudeCodeMenubar started (bundleId=\(Bundle.main.bundleIdentifier ?? "?"))")
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
