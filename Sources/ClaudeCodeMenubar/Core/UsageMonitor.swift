@@ -86,15 +86,14 @@ final class UsageMonitor: ObservableObject {
 
     /// 사용자가 메뉴바에서 명시적으로 "새로고침" 클릭한 경우 — 모든 계정의 backoff 클리어 후 즉시 폴링.
     /// 자동 폴링과 달리 rate_limit/invalid_grant backoff 도 무시 (사용자 의도 우선).
-    /// fire-and-forget — 완료 콜백 없음 (UI 인디케이터 필요 시 별도 async API 추가).
-    func refreshAllForcing() {
+    /// await 으로 완료 대기 가능 — UI 가 spinner / disable 인디케이터에 사용.
+    func refreshAllForcing() async {
         guard let am = accountManager else { return }
-        let ids = am.accounts.map(\.id)
-        for id in ids {
+        for id in am.accounts.map(\.id) {
             nextEligibleAt[id] = nil
             if lastError[id] != nil { lastError[id] = nil }
         }
-        Task { await refreshAllOnce() }
+        await refreshAllOnce()
     }
 
     /// 새 토큰 import / 스위치 직후 호출되어 backoff 를 풀고 즉시 재폴링.
