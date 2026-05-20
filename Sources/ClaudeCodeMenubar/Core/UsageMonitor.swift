@@ -84,6 +84,15 @@ final class UsageMonitor: ObservableObject {
         }
     }
 
+    /// 사용자가 메뉴바에서 명시적으로 "새로고침" 클릭한 경우 — 모든 계정의 backoff 클리어 후 즉시 폴링.
+    /// 자동 폴링과 달리 rate_limit/invalid_grant backoff 도 무시 (사용자 의도 우선).
+    func refreshAllForcing() {
+        guard let am = accountManager else { return }
+        for id in am.accounts.map(\.id) {
+            invalidateBackoff(for: id)
+        }
+    }
+
     /// 새 토큰 import / 스위치 직후 호출되어 backoff 를 풀고 즉시 재폴링.
     func invalidateBackoff(for accountID: AccountID) {
         nextEligibleAt[accountID] = nil

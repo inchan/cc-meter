@@ -80,7 +80,7 @@ struct AccountMenuView: View {
     private var actionRow: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                Task { await monitor.refreshAllOnce() }
+                monitor.refreshAllForcing()
             } label: {
                 Label("새로고침", systemImage: "arrow.clockwise")
                     .frame(maxWidth: .infinity, alignment: .leading)
