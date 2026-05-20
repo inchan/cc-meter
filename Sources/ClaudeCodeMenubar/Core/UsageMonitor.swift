@@ -86,11 +86,15 @@ final class UsageMonitor: ObservableObject {
 
     /// 사용자가 메뉴바에서 명시적으로 "새로고침" 클릭한 경우 — 모든 계정의 backoff 클리어 후 즉시 폴링.
     /// 자동 폴링과 달리 rate_limit/invalid_grant backoff 도 무시 (사용자 의도 우선).
+    /// fire-and-forget — 완료 콜백 없음 (UI 인디케이터 필요 시 별도 async API 추가).
     func refreshAllForcing() {
         guard let am = accountManager else { return }
-        for id in am.accounts.map(\.id) {
-            invalidateBackoff(for: id)
+        let ids = am.accounts.map(\.id)
+        for id in ids {
+            nextEligibleAt[id] = nil
+            if lastError[id] != nil { lastError[id] = nil }
         }
+        Task { await refreshAllOnce() }
     }
 
     /// 새 토큰 import / 스위치 직후 호출되어 backoff 를 풀고 즉시 재폴링.
@@ -287,7 +291,7 @@ final class UsageMonitor: ObservableObject {
 
         do {
             let new = try await oauthRefresh.refresh(refreshToken: current.refreshToken, existing: current)
-            try saveRefreshedCredentials(accountID: accountID, new: new)
+            try saveRefreshedCredentials(accountID: accountID, current: current, new: new)
             Log.usage.info("[REFRESH-TOKEN ok] id=\(accountID, privacy: .public)")
             return new
         } catch OAuthRefreshError.invalidGrant(let msg) {
@@ -306,7 +310,11 @@ final class UsageMonitor: ObservableObject {
     }
 
     /// 새 credentials 를 snapshot 에 원자적 write. 기존 oauthAccount JSON 은 유지.
-    private func saveRefreshedCredentials(accountID: AccountID, new: ClaudeAiOAuth) throws {
+    /// access/refresh 둘 다 동일하면 skip (서버가 rotation 안 한 + access 도 같은 케이스 — 드물지만 가능).
+    private func saveRefreshedCredentials(accountID: AccountID, current: ClaudeAiOAuth, new: ClaudeAiOAuth) throws {
+        if new.accessToken == current.accessToken && new.refreshToken == current.refreshToken {
+            return
+        }
         let root = ClaudeCredentialsRoot(claudeAiOauth: new)
         let credData = try JSON.encode(root)
         let configData: Data = (try? snapshotStore.read(for: accountID)?.oauthAccountJSON) ?? Data("{}".utf8)
